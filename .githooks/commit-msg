@@ -1,0 +1,6 @@
+#!/bin/sh
+# Rejects AI author or contributor credit in commit messages.
+if grep -Eiq '(co-authored-by:|generated (with|by) .*(claude|ai|copilot|gpt)|noreply@anthropic\.com)' "$1"; then
+  echo "commit-msg: AI attribution is not allowed in this repo." >&2
+  exit 1
+fi

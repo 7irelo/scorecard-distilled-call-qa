@@ -1,0 +1,69 @@
+[project]
+name = "scorecard"
+version = "0.1.0"
+description = "Distill a large open LLM into a small model for contact-centre call QA"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115",
+  "httpx>=0.27",
+  "jiwer>=3.0",
+  "numpy>=1.26",
+  "prometheus-client>=0.20",
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+  "scikit-learn>=1.5",
+  "typer>=0.12",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+train = [
+  "accelerate>=1.0",
+  "bitsandbytes>=0.43; sys_platform == 'linux'",
+  "datasets>=3.0",
+  "peft>=0.13",
+  "torch>=2.4",
+  "transformers>=4.51",
+  "trl>=0.12",
+  "wandb>=0.18",
+]
+closed-baselines = ["anthropic>=0.60"]
+
+[project.scripts]
+scorecard = "scorecard.cli:app"
+
+[dependency-groups]
+dev = ["mypy>=1.11", "pytest>=8.0", "ruff>=0.6", "types-PyYAML>=6.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scorecard"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["scorecard"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "jiwer.*", "datasets.*", "peft.*", "trl.*", "transformers.*", "torch.*", "wandb.*", "anthropic.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["train: needs the train extra and downloads a tiny model"]

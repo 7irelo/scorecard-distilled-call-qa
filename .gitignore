@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+/data/
+/runs/
+/wandb/
+*.safetensors
+*.wav
+*.mp3
+*.volumes.jsonl

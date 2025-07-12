@@ -1,0 +1,59 @@
+# Named models and the role each one plays. Confirm IDs and prices with the host before a paid run,
+# and read the host's terms (docs/adr/0001-licensing.md). Prices are reported figures, not verified.
+roles:
+  generator: glm # Blocked until Z.ai's terms are read (docs/adr/0001-licensing.md)
+  verifier: deepseek
+  teacher: deepseek # Hosted terms explicitly allow distillation
+  judge: qwen_large
+  baseline_cheap: haiku
+  baseline_top: opus
+  student: student
+  zero_shot: zero_shot
+cache_path: runs/llm_cache.sqlite
+ledger_path: runs/cost_ledger.jsonl
+models:
+  deepseek:
+    model_id: deepseek-v4-pro
+    family: deepseek
+    provider_class: open_weight
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+    input_per_mtok: 1.32
+    output_per_mtok: 3.96
+  glm:
+    model_id: glm-5
+    family: glm
+    provider_class: open_weight
+    base_url: https://api.z.ai/api/paas/v4
+    api_key_env: ZAI_API_KEY
+    input_per_mtok: 1.40
+    output_per_mtok: 4.40
+  qwen_large:
+    # Set to a licence-checked large Qwen on whichever host you choose.
+    model_id: SET_ME
+    family: qwen
+    provider_class: open_weight
+    base_url: http://localhost:8001/v1
+  haiku:
+    model_id: claude-haiku-5-5
+    family: claude
+    provider_class: closed
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+  opus:
+    model_id: claude-opus-5-5
+    family: claude
+    provider_class: closed
+    input_per_mtok: 4.00
+    output_per_mtok: 20.00
+  student:
+    # Our own vLLM server, using the adapter's served name.
+    model_id: student
+    family: student
+    provider_class: open_weight
+    base_url: http://localhost:8000/v1
+  zero_shot:
+    model_id: base
+    family: student
+    provider_class: open_weight
+    base_url: http://localhost:8000/v1
