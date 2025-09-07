@@ -1,0 +1,18 @@
+# Phase 6 starting point. Pin `revision` to a commit hash before any real run.
+name: baseline
+base_model: Qwen/Qwen3-4B
+revision: null
+train_path: data/train.jsonl
+val_path: data/silver_val.jsonl
+output_dir: runs
+max_seq_length: 8192
+quantization: nf4
+lora_rank: 16
+learning_rate: 0.0002
+epochs: 3
+batch_size: 1
+grad_accum: 8
+eval_every_steps: 200
+eval_calls: 100
+gpu_usd_per_hour: 0.59
+report_to: wandb
