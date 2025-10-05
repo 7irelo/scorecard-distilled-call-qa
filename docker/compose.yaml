@@ -1,0 +1,46 @@
+# GPU stack, on a Linux host with the NVIDIA runtime:
+#   docker compose -f docker/compose.yaml up --build
+services:
+  vllm:
+    # Pin an exact tag and confirm it supports the base model before a real run.
+    image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to an exact version}
+    command:
+      - --model=${BASE_MODEL:?set BASE_MODEL}
+      - --revision=${BASE_REVISION:?pin BASE_REVISION to a commit hash}
+      - --served-model-name=base
+      - --enable-lora
+      - --lora-modules=student=/adapters/student
+      - --max-lora-rank=${LORA_RANK:?set LORA_RANK to the adapter's actual rank}
+      - --max-model-len=${MAX_MODEL_LEN:-9216}
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${ADAPTER_DIR:?set ADAPTER_DIR}:/adapters/student:ro
+      - hf-cache:/root/.cache/huggingface
+    gpus: all
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 40
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    environment:
+      SCORECARD_API_KEY: ${SCORECARD_API_KEY:?set SCORECARD_API_KEY}
+      SCORECARD_BACKEND: vllm
+      SCORECARD_VLLM_URL: http://vllm:8000/v1
+      SCORECARD_VLLM_MODEL: student
+      SCORECARD_MODEL_REVISION: ${BASE_REVISION}
+      SCORECARD_ADAPTER_HASH: ${ADAPTER_HASH:-unset}
+    depends_on:
+      vllm:
+        condition: service_healthy
+    ports: ["8000:8000"]
+    read_only: true
+    tmpfs: [/tmp]
+
+volumes:
+  hf-cache:

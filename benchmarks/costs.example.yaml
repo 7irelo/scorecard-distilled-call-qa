@@ -1,0 +1,34 @@
+# PLACEHOLDER INPUTS. Replace throughput and token counts with measured values, and set measured:
+# true on each. The report warns until every option is measured.
+self_hosted:
+  - name: L4 Secure Cloud
+    gpu_usd_per_hour: 0.59
+    peak_calls_per_hour: 1800 # Placeholder: 30 calls/min, not measured
+    measured: false
+apis:
+  - name: Opus 5.5
+    input_per_mtok: 4.00
+    output_per_mtok: 20.00
+    batch_discount: 0.5
+    input_tokens: 6000
+    output_tokens: 500 # Excludes thinking tokens, so the real cost is likely higher
+    measured: false
+  - name: Sonnet 5.5
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+    batch_discount: 0.5
+    input_tokens: 6000
+    output_tokens: 500
+    measured: false
+  - name: Haiku 5.5
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+    batch_discount: 0.5
+    input_tokens: 6000
+    output_tokens: 500
+    measured: false
+fixed:
+  training_and_labelling_usd: 0
+  amortisation_months: 12
+  ops_hours_per_month: 0
+  ops_usd_per_hour: 0

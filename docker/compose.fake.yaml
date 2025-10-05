@@ -1,0 +1,13 @@
+# CPU check with rule-based outputs, no GPU needed:
+#   SCORECARD_API_KEY=local docker compose -f docker/compose.fake.yaml up --build
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    environment:
+      SCORECARD_API_KEY: ${SCORECARD_API_KEY:?set SCORECARD_API_KEY}
+      SCORECARD_BACKEND: fake
+    ports: ["8000:8000"]
+    read_only: true
+    tmpfs: [/tmp]
