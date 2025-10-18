@@ -34,7 +34,8 @@ VERIFY_SYSTEM = """Read this call transcript and report what literally happens i
 account? Use not_applicable if no account was discussed.
 - terms_explained: were fees, notice period or contract terms explained? Use not_applicable if no \
 terms were relevant, or the call ended before they could be.
-- next_steps_confirmed: did the agent confirm what happens next? Use not_applicable if the customer \
+- next_steps_confirmed: did the agent confirm what happens next? Use not_applicable if \
+the customer \
 hung up first.
 - escalation_trigger_present: did the customer threaten a regulator or ombudsman, report repeat \
 unresolved contacts, mention a safety risk, or did the agent make a clear harmful error?

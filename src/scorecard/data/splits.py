@@ -29,7 +29,9 @@ def assign_splits(
     filled: Counter[str] = Counter()
     # Tracks each call type per split so that rare types are spread across splits.
     type_filled: Counter[tuple[str, str]] = Counter()
-    type_total: Counter[str] = Counter(s.call_type.value for s in sum(groups.values(), []))
+    type_total: Counter[str] = Counter(
+        s.call_type.value for members in groups.values() for s in members
+    )
 
     ordered = sorted(groups)
     random.Random(seed).shuffle(ordered)

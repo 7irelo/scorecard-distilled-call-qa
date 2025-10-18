@@ -89,7 +89,8 @@ Customer: {spec.customer_name}, temperament: {spec.temperament}
 Reason for the call: {spec.issue}
 How the call ends: {spec.outcome.replace("_", " ")}
 
-Customer sentiment: starts {spec.sentiment.opening.value}, is {spec.sentiment.middle.value} midway, \
+Customer sentiment: starts {spec.sentiment.opening.value}, is \
+{spec.sentiment.middle.value} midway, \
 and ends {spec.sentiment.closing.value}.
 
 Languages: {MIX_NAMES[spec.language_mix]}.
