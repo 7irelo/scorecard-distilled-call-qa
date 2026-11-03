@@ -52,8 +52,15 @@ models:
     family: student
     provider_class: open_weight
     base_url: http://localhost:8000/v1
+    # Training disables thinking, so evaluation must too.
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
   zero_shot:
     model_id: base
     family: student
     provider_class: open_weight
     base_url: http://localhost:8000/v1
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false

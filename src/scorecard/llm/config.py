@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from scorecard.io import stable_json
 from scorecard.llm.backends import AnthropicBackend, OpenAICompatibleBackend
 from scorecard.llm.client import CostLedger, LLMClient, Price, ResponseCache
 from scorecard.llm.types import Backend, ProviderClass
@@ -22,6 +24,7 @@ class ModelConfig(BaseModel):
     api_key_env: str | None = None
     input_per_mtok: float = 0.0
     output_per_mtok: float = 0.0
+    extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMConfig(BaseModel):
@@ -52,7 +55,7 @@ def build_backend(model: ModelConfig) -> Backend:
     if model.base_url is None:
         raise ValueError(f"{model.model_id} needs a base_url")
     key = os.environ.get(model.api_key_env, "") if model.api_key_env else ""
-    return OpenAICompatibleBackend(model.base_url, key)
+    return OpenAICompatibleBackend(model.base_url, key, extra_body=model.extra_body)
 
 
 def build_client(config: LLMConfig, role: str, concurrency: int = 8) -> tuple[LLMClient, str]:
@@ -63,5 +66,6 @@ def build_client(config: LLMConfig, role: str, concurrency: int = 8) -> tuple[LL
         ledger=CostLedger(config.ledger_path),
         price=Price(model.input_per_mtok, model.output_per_mtok),
         concurrency=concurrency,
+        namespace=stable_json(model.extra_body) if model.extra_body else "",
     )
     return client, model.model_id

@@ -15,6 +15,12 @@ from scorecard.llm.client import LLMClient
 from scorecard.llm.types import LLMRequest, Outcome, Purpose
 from scorecard.prompts import small_model_messages
 from scorecard.schema import Scorecard, scorecard_json_schema
+from scorecard.train.format import (
+    PER_FIELD_NAMES,
+    assemble_fields,
+    per_field_messages,
+    per_field_schema,
+)
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 _THINK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
@@ -80,13 +86,64 @@ async def predict_llm(
     )
 
 
+async def predict_per_field(
+    client: LLMClient,
+    model: str,
+    transcript: Transcript,
+    constrained: bool = True,
+    max_tokens: int = 512,
+) -> Prediction:
+    """One call per field, for the ablation arm that trades inference cost for focus."""
+    responses = await asyncio.gather(
+        *(
+            client.complete(
+                LLMRequest(
+                    model=model,
+                    messages=tuple(
+                        (m["role"], m["content"]) for m in per_field_messages(transcript, field)
+                    ),
+                    purpose=Purpose.BASELINE,
+                    json_schema=per_field_schema(field) if constrained else None,
+                    max_tokens=max_tokens,
+                )
+            )
+            for field in PER_FIELD_NAMES
+        )
+    )
+    input_tokens = sum(r.input_tokens for r in responses)
+    output_tokens = sum(r.output_tokens for r in responses)
+    bad = next((r for r in responses if r.outcome is not Outcome.OK), None)
+    if bad is not None:
+        return Prediction(
+            transcript.scenario_id, None, False, bad.outcome.value, input_tokens, output_tokens
+        )
+    outputs = {
+        field: _FENCE.sub("", _THINK.sub("", r.text).strip())
+        for field, r in zip(PER_FIELD_NAMES, responses, strict=True)
+    }
+    try:
+        card = assemble_fields(outputs)
+    except (json.JSONDecodeError, KeyError, TypeError, ValidationError):
+        return Prediction(
+            transcript.scenario_id, None, False, "invalid", input_tokens, output_tokens
+        )
+    return Prediction(transcript.scenario_id, card, True, "ok", input_tokens, output_tokens)
+
+
 async def predict_all(
     client: LLMClient,
     model: str,
     transcripts: Sequence[Transcript],
     examples: tuple[tuple[Transcript, str], ...] = (),
     constrained: bool = True,
+    per_field: bool = False,
 ) -> list[Prediction]:
+    if per_field:
+        return list(
+            await asyncio.gather(
+                *(predict_per_field(client, model, t, constrained) for t in transcripts)
+            )
+        )
     return list(
         await asyncio.gather(
             *(predict_llm(client, model, t, examples, constrained) for t in transcripts)

@@ -143,6 +143,11 @@ def stability(first: list[TeacherLabel], second: list[TeacherLabel]) -> dict[str
     return {name: agree[name] / total[name] for name in total}
 
 
+def is_unstable(first: Scorecard, second: Scorecard | None) -> bool:
+    """True if relabelling changed any field. A label that was never repeated is not flagged."""
+    return second is not None and flatten_labels(first) != flatten_labels(second)
+
+
 def qc_report(results: list[QCResult], labels: list[TeacherLabel]) -> dict[str, object]:
     outcomes = Counter(label.outcome for label in labels)
     semantic = Counter(issue for r in results for issue in r.semantic)

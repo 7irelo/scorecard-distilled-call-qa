@@ -86,12 +86,19 @@ def build_report(
     if post_hoc:
         reasons = "; ".join(post_hoc)
         lines.append(f"> **The test set was reopened after first scoring.** Reasons: {reasons}\n")
+    failures = {s.name: s.judge_failures for s in scores if s.judge_failures}
+    if failures:
+        listed = ", ".join(f"{name}: {count}" for name, count in failures.items())
+        lines.append(
+            f"> **Judge failures, excluded from summary scores:** {listed}. "
+            "Re-run the judge if these are more than a handful.\n"
+        )
     lines += [
         "# Evaluation report",
         "",
         f"Evaluated on {len(eval_set.ids)} calls.",
         "",
-        f"**Quality retained (student / teacher): {retained.format()}**",
+        f"**Quality retained ({student.name} / {teacher.name}): {retained.format()}**",
         "",
         "A result counts only if every floor also holds: "
         + ", ".join(f"{name} {'met' if met else 'NOT met'}" for name, met in floors.items())
@@ -116,13 +123,19 @@ def build_report(
             f"{'yes' if survivors[name] else 'no'} |"
         )
     for title, mapping in (slices or {}).items():
-        lines += ["", f"## Exploratory slice: {title}", "", slice_table(eval_set, outputs, mapping)]
+        lines += [
+            "",
+            f"## Exploratory slice: {title}",
+            "",
+            slice_table(eval_set, outputs, mapping, min(resamples, 500)),
+        ]
     summary: dict[str, object] = {
         "quality_retained": retained.point,
         "quality_retained_ci": [retained.low, retained.high],
         "floors": floors,
         "headline_counts": all(floors.values()),
-        "scores": {s.name: {"q": s.q, **s.parts} for s in scores},
+        "scores": {s.name: {"q": s.q, "structured": s.structured, **s.parts} for s in scores},
+        "judge_failures": failures,
         "dry_run": dry_run,
     }
     return "\n".join(lines) + "\n", summary

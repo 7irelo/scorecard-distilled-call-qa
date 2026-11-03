@@ -20,7 +20,9 @@ class OpenAICompatibleBackend:
         api_key: str = "",
         timeout: float = 600.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
+        self._extra_body = extra_body or {}
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/") + "/",
@@ -35,6 +37,7 @@ class OpenAICompatibleBackend:
             "messages": [{"role": r, "content": c} for r, c in request.messages],
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
+            **self._extra_body,
         }
         if request.json_schema is not None:
             body["response_format"] = {

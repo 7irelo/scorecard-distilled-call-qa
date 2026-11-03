@@ -86,7 +86,7 @@ class CostLedger:
             return float(sum(json.loads(line)["cost_usd"] for line in handle if line.strip()))
 
 
-def cache_key(request: LLMRequest) -> str:
+def cache_key(request: LLMRequest, namespace: str = "") -> str:
     return sha256_text(
         stable_json(
             {
@@ -96,6 +96,7 @@ def cache_key(request: LLMRequest) -> str:
                 "max_tokens": request.max_tokens,
                 "temperature": request.temperature,
                 "salt": request.salt,
+                "namespace": namespace,
             }
         )
     )
@@ -111,6 +112,7 @@ class LLMClient:
         concurrency: int = 8,
         max_attempts: int = 5,
         base_delay: float = 1.0,
+        namespace: str = "",
     ) -> None:
         self._backend = backend
         self._cache = cache
@@ -119,6 +121,7 @@ class LLMClient:
         self._concurrency = concurrency
         self._max_attempts = max_attempts
         self._base_delay = base_delay
+        self._namespace = namespace
         self._gate: asyncio.Semaphore | None = None
         self._gate_loop: asyncio.AbstractEventLoop | None = None
 
@@ -130,7 +133,7 @@ class LLMClient:
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         enforce_policy(self._backend.provider_class, request.purpose)
-        key = cache_key(request)
+        key = cache_key(request, self._namespace)
         if self._cache is not None:
             hit = self._cache.get(key)
             if hit is not None:

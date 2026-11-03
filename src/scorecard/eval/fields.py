@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,6 +37,9 @@ class SystemOutput:
     cards: Mapping[str, Scorecard | None]
     faithfulness: Mapping[str, float] = field(default_factory=dict)
     parse_valid: Mapping[str, bool] = field(default_factory=dict)
+    summary_transform: Callable[[float], float] | None = None
+    """Maps the mean judged score to a calibrated estimate. Applied to the mean, as clipping
+    per call would bias it."""
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,7 @@ class Columns:
     predicted: dict[str, np.ndarray]
     faithfulness: np.ndarray
     weights: np.ndarray
+    summary_transform: Callable[[float], float] | None = None
 
     @classmethod
     def build(cls, eval_set: EvalSet, output: SystemOutput) -> Columns:
@@ -107,6 +111,7 @@ class Columns:
                 [output.faithfulness.get(i, 0.0) for i in eval_set.ids], dtype=float
             ),
             weights=eval_set.weights,
+            summary_transform=output.summary_transform,
         )
 
 
@@ -121,14 +126,29 @@ def components(columns: Columns, index: np.ndarray | None = None) -> dict[str, f
     sentiment = np.nanmean([weighted_macro_f1(*pair(name), weights) for name in SENTIMENT_SEGMENTS])
     gold_flag, predicted_flag = pair("escalation.flag")
     escalation = _f1(gold_flag == "true", predicted_flag == "true", weights)
-    total = float(weights.sum())
-    summary = float((columns.faithfulness[selected] * weights).sum()) / total if total else 0.0
+    # NaN marks a judge failure: a gap in measurement, so it isn't scored for or against.
+    judged = ~np.isnan(columns.faithfulness[selected])
+    total = float(weights[judged].sum())
+    summary = (
+        float((columns.faithfulness[selected][judged] * weights[judged]).sum()) / total
+        if total
+        else 0.0
+    )
+    if columns.summary_transform is not None:
+        summary = columns.summary_transform(summary)
     return {
         "compliance": float(compliance),
         "escalation": escalation,
         "sentiment": float(sentiment),
         "summary": summary,
     }
+
+
+def structured_score(columns: Columns) -> float:
+    """Q without the summary term, renormalised, for comparisons that skip the judge."""
+    parts = components(columns)
+    weighted = sum(Q_WEIGHTS[n] * parts[n] for n in ("compliance", "escalation", "sentiment"))
+    return weighted / (1 - Q_WEIGHTS["summary"])
 
 
 def composite(parts: Mapping[str, float]) -> float:
@@ -181,6 +201,8 @@ class SystemScore:
     evidence_precision: float
     validity: Interval
     field_accuracy: dict[str, Interval]
+    structured: float = float("nan")
+    judge_failures: int = 0
 
     def floors_met(self) -> dict[str, bool]:
         return {
@@ -216,6 +238,8 @@ def score_system(eval_set: EvalSet, output: SystemOutput, resamples: int = 2000)
         evidence_precision=evidence_precision(eval_set, output),
         validity=wilson(valid, len(eval_set.ids)),
         field_accuracy=accuracy,
+        structured=structured_score(columns),
+        judge_failures=int(np.isnan(columns.faithfulness).sum()),
     )
 
 
