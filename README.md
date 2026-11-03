@@ -7,7 +7,9 @@ Distill a large open LLM into a small model that scores South African contact-ce
 
 ## Status
 
-**The code is built. There are no real results yet.** No real data has been generated and no real student has been trained, so this repo doesn't claim any quality or cost figures. Getting them needs API keys, a rented GPU and about 30 hours of human labelling, as set out in [the runbook](docs/RUNBOOK.md).
+**The code covers every phase. There are no real results yet.** No real data has been generated and no real student has been trained, so this repo doesn't claim any quality or cost figures. Getting them needs API keys, a rented GPU, native-speaker reviewers and about 30 hours of human labelling, as set out in [the runbook](docs/RUNBOOK.md).
+
+Tested so far: the pipeline on stub models, training on CPU with a tiny random model, and the API container with rule-based outputs. Not yet run against the real thing: vLLM on a GPU, the hosted model APIs and the speech vendors, which are only mocked in tests.
 
 ## Try it
 
@@ -48,6 +50,7 @@ uv run scorecard demo
 - [Licensing ADR](docs/adr/0001-licensing.md): why closed APIs stay out of the training data path, enforced in code
 - [Pre-registered metrics](docs/METRICS.md): fixed before training
 - [Rubric](docs/RUBRIC.md): the definition of each field
+- [Report template](docs/REPORT.md): what the finished results will show
 
 ## Limits
 
