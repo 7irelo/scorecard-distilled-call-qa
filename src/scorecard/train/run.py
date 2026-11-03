@@ -11,6 +11,7 @@ from typing import Any
 import torch
 from datasets import Dataset
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+from pydantic import ValidationError
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -26,9 +27,13 @@ from scorecard.io import read_jsonl, sha256_file
 from scorecard.schema import Scorecard, flatten_labels
 from scorecard.train.config import OutputMode, Quantization, TrainConfig
 from scorecard.train.format import (
+    IGNORE_INDEX,
+    PER_FIELD_NAMES,
+    assemble_fields,
     describe_selection,
     encode_rows,
     full_messages,
+    per_field_messages,
     render_prompt,
     select_training_rows,
 )
@@ -68,10 +73,10 @@ def load_model_and_tokenizer(config: TrainConfig) -> tuple[Any, Any]:
     return get_peft_model(model, lora), tokenizer
 
 
-def generate_card(
-    model: Any, tokenizer: Any, transcript: Transcript, config: TrainConfig
-) -> tuple[Scorecard | None, bool, str]:
-    prompt = render_prompt(tokenizer, full_messages(transcript), config.disable_thinking)
+def _generate_text(
+    model: Any, tokenizer: Any, messages: list[dict[str, str]], config: TrainConfig
+) -> str:
+    prompt = render_prompt(tokenizer, messages, config.disable_thinking)
     inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
     with torch.no_grad():
         output = model.generate(
@@ -80,7 +85,26 @@ def generate_card(
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id,
         )
-    text = tokenizer.decode(output[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+    return str(
+        tokenizer.decode(output[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+    )
+
+
+def generate_card(
+    model: Any, tokenizer: Any, transcript: Transcript, config: TrainConfig
+) -> tuple[Scorecard | None, bool, str]:
+    """Generate with the same prompt form the run trained on."""
+    if config.output_mode is OutputMode.PER_FIELD:
+        outputs = {
+            name: _generate_text(model, tokenizer, per_field_messages(transcript, name), config)
+            for name in PER_FIELD_NAMES
+        }
+        text = json.dumps(outputs, ensure_ascii=False)
+        try:
+            return assemble_fields(outputs), True, text
+        except (json.JSONDecodeError, KeyError, TypeError, ValidationError):
+            return None, False, text
+    text = _generate_text(model, tokenizer, full_messages(transcript), config)
     card, valid = parse_scorecard(text)
     return card, valid, text
 
@@ -164,7 +188,11 @@ def run_training(config: TrainConfig, resume: bool = False) -> dict[str, Any]:
 
     start = time.time()
     rows = select_training_rows(list(read_jsonl(config.train_path)), config)
-    val_rows = [r for r in read_jsonl(config.val_path) if r.get("card")][: config.eval_calls]
+    val_rows = (
+        rows[: config.eval_calls]
+        if config.val_from_train
+        else [r for r in read_jsonl(config.val_path) if r.get("card")][: config.eval_calls]
+    )
     model, tokenizer = load_model_and_tokenizer(config)
     encoded, report = encode_rows(tokenizer, rows, config)
     if not encoded:
@@ -199,7 +227,8 @@ def run_training(config: TrainConfig, resume: bool = False) -> dict[str, Any]:
         num_train_epochs=config.epochs,
         max_steps=config.max_steps,
         lr_scheduler_type="cosine",
-        warmup_ratio=config.warmup_ratio,
+        # Transformers 5 reads a value below 1 here as a share of total steps.
+        warmup_steps=config.warmup_ratio,
         logging_steps=10,
         save_steps=config.eval_every_steps,
         save_total_limit=2,
@@ -258,3 +287,39 @@ def merge_adapter(
     merged = PeftModel.from_pretrained(base, str(adapter)).merge_and_unload()
     merged.save_pretrained(output)
     AutoTokenizer.from_pretrained(base_model, revision=revision).save_pretrained(output)
+
+
+def overfit_config(config: TrainConfig, steps: int = 200) -> TrainConfig:
+    """Ten examples must reach near-perfect output, which catches template and masking bugs."""
+    return config.model_copy(
+        update={
+            "name": f"{config.name}-overfit",
+            "train_size": 10,
+            "val_from_train": True,
+            "eval_calls": 10,
+            "max_steps": steps,
+            "grad_accum": 1,
+            "warmup_ratio": 0.0,
+            "lora_dropout": 0.0,
+            "eval_every_steps": steps,
+            "early_stopping_patience": 10_000,
+            "report_to": "none",
+        }
+    )
+
+
+def inspect_example(config: TrainConfig, row: dict[str, Any]) -> dict[str, Any]:
+    """Decode one example and its label mask, to read before any long run."""
+    tokenizer = AutoTokenizer.from_pretrained(config.base_model, revision=config.revision)
+    encoded, report = encode_rows(tokenizer, [row], config)
+    if not encoded:
+        return {"too_long": report.too_long}
+    example = encoded[0]
+    trained = [token for token in example["labels"] if token != IGNORE_INDEX]
+    masked = len(example["labels"]) - len(trained)
+    return {
+        "total_tokens": len(example["input_ids"]),
+        "masked_tokens": masked,
+        "prompt_tail": tokenizer.decode(example["input_ids"][max(0, masked - 40) : masked]),
+        "trained_text": tokenizer.decode(trained),
+    }

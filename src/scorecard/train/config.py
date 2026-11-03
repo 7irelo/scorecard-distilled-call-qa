@@ -24,7 +24,7 @@ class Quantization(StrEnum):
 class LabelFilter(StrEnum):
     RAW = "raw"
     CLEAN = "clean"
-    """Drops labels flagged as unstable or that disagree with planted truth."""
+    """Drops labels that are incoherent, disagree with planted truth or changed on relabelling."""
 
 
 class TrainConfig(BaseModel):
@@ -53,6 +53,8 @@ class TrainConfig(BaseModel):
     label_filter: LabelFilter = LabelFilter.RAW
     code_switch_share: float = 1.0
     """Fraction of code-switched calls to keep. Used only by ablation F."""
+    val_from_train: bool = False
+    """Validates on training rows. Only for the overfit check, which needs exactly this."""
     eval_every_steps: int = 200
     eval_calls: int = 100
     max_new_tokens: int = 700

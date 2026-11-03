@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from scorecard.data.models import LanguageMix, Transcript
+from scorecard.data.reality import assert_no_reality_rows
 from scorecard.prompts import COMPACT_TASK, user_message
 from scorecard.schema import (
     COMPLIANCE_CHECKS,
@@ -53,6 +54,15 @@ def per_field_targets(card: Scorecard) -> dict[str, str]:
     for check in COMPLIANCE_CHECKS:
         targets[f"compliance.{check}"] = getattr(card.compliance, check).model_dump_json()
     return targets
+
+
+PER_FIELD_NAMES: tuple[str, ...] = (
+    "summary",
+    "call_type",
+    "sentiment",
+    "escalation",
+    *(f"compliance.{check}" for check in COMPLIANCE_CHECKS),
+)
 
 
 def per_field_schema(field: str) -> dict[str, Any]:
@@ -178,6 +188,7 @@ def select_training_rows(rows: list[dict[str, Any]], config: TrainConfig) -> lis
 
     Ordering uses a fixed key rather than the run seed, so the size ablation changes one thing.
     """
+    assert_no_reality_rows(rows)
     selected = [r for r in rows if r.get("card") is not None]
     if config.label_filter is LabelFilter.CLEAN:
         selected = [r for r in selected if r.get("qc_clean", False)]

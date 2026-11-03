@@ -1,0 +1,28 @@
+# Phase 6 student bake-off. Pin each revision to a commit hash before a real run. A candidate only
+# runs once licence_verified is true, which means you've read its model card yourself.
+train_size: 500
+candidates:
+  - slug: qwen3-4b
+    base_model: Qwen/Qwen3-4B
+    revision: null
+    licence: Apache-2.0
+    licence_verified: true # Model card read 2026-11-03 (docs/adr/0001-licensing.md)
+    notes: The default. Mature tooling, vLLM >= 0.8.5.
+  - slug: smollm3-3b
+    base_model: HuggingFaceTB/SmolLM3-3B
+    revision: null
+    licence: Apache-2.0
+    licence_verified: true # Model card read 2026-11-03
+    notes: Native languages don't include isiZulu or Afrikaans, so watch the code-switched slice.
+  - slug: qwen35-4b
+    base_model: Qwen/Qwen3.5-4B
+    revision: null
+    licence: Apache-2.0
+    licence_verified: true # Model card read 2026-11-03
+    notes: Multimodal, and needs vLLM's main branch, which costs more to serve reliably.
+  - slug: phi4-mini
+    base_model: microsoft/Phi-4-mini-instruct
+    revision: null
+    licence: MIT (reported)
+    licence_verified: false # Secondary source only. Read the model card, then set this to true.
+    notes: Older model. Leave it out if the card can't be confirmed.
