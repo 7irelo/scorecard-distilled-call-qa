@@ -18,6 +18,10 @@ class SelfHosted(BaseModel):
     peak_calls_per_hour: float
     measured: bool = False
     """False marks throughput as a placeholder. Reports refuse to present those as results."""
+    serverless_usd_per_hour: float | None = None
+    cold_start_seconds: float = 60.0
+    cold_starts_per_month: int = 300
+    quality_retained: float | None = None
 
 
 class ApiOption(BaseModel):
@@ -30,6 +34,7 @@ class ApiOption(BaseModel):
     output_tokens: int
     retry_rate: float = 0.0
     measured: bool = False
+    quality_retained: float | None = None
 
     def usd_per_1k(self, batch: bool = False) -> float:
         per_call = (
@@ -93,6 +98,15 @@ def scheduled_monthly_usd(option: SelfHosted, volume: int, fixed: Fixed) -> floa
     return volume / option.peak_calls_per_hour * option.gpu_usd_per_hour + fixed_monthly_usd(fixed)
 
 
+def serverless_monthly_usd(option: SelfHosted, volume: int, fixed: Fixed) -> float | None:
+    """Pay per active second, plus the billed time spent loading the model on each cold start."""
+    if option.serverless_usd_per_hour is None:
+        return None
+    active_hours = volume / option.peak_calls_per_hour
+    cold_hours = option.cold_starts_per_month * option.cold_start_seconds / 3600
+    return (active_hours + cold_hours) * option.serverless_usd_per_hour + fixed_monthly_usd(fixed)
+
+
 def always_on_break_even_calls(
     option: SelfHosted, api: ApiOption, fixed: Fixed, batch: bool
 ) -> float:
@@ -144,6 +158,15 @@ def volume_table(inputs: CostInputs) -> list[dict[str, object]]:
                     "monthly_usd": round(scheduled_monthly_usd(option, volume, inputs.fixed), 2),
                 }
             )
+            serverless = serverless_monthly_usd(option, volume, inputs.fixed)
+            if serverless is not None:
+                rows.append(
+                    {
+                        "calls_per_month": volume,
+                        "option": f"{option.name} serverless",
+                        "monthly_usd": round(serverless, 2),
+                    }
+                )
         for api in inputs.apis:
             for batch in (False, True):
                 mode = "batch" if batch else "standard"
@@ -167,6 +190,71 @@ def quality_adjusted_usd_per_1k(usd_per_1k: float, quality_retained: float) -> f
     return usd_per_1k / quality_retained
 
 
+def length_sensitivity(
+    inputs: CostInputs, factors: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0)
+) -> list[dict[str, object]]:
+    """Cost per 1k calls as transcripts change length, at full GPU utilisation.
+
+    Input tokens scale with length, and throughput is assumed to fall in proportion. That is a
+    simplification, so measure real long-call throughput before relying on the long end.
+    """
+    rows: list[dict[str, object]] = []
+    for factor in factors:
+        for option in inputs.self_hosted:
+            slower = option.model_copy(
+                update={"peak_calls_per_hour": option.peak_calls_per_hour / factor}
+            )
+            rows.append(
+                {
+                    "length_factor": factor,
+                    "option": option.name,
+                    "usd_per_1k": round(self_hosted_usd_per_1k(slower, 1.0), 4),
+                }
+            )
+        for api in inputs.apis:
+            longer = api.model_copy(update={"input_tokens": int(api.input_tokens * factor)})
+            rows.append(
+                {
+                    "length_factor": factor,
+                    "option": f"{api.name} batch",
+                    "usd_per_1k": round(longer.usd_per_1k(batch=True), 4),
+                }
+            )
+    return rows
+
+
+def quality_adjusted_rows(inputs: CostInputs, utilisation: float = 0.5) -> list[dict[str, object]]:
+    """Only for options with a measured quality result. The rest stay out rather than guessed."""
+    rows: list[dict[str, object]] = []
+    for option in inputs.self_hosted:
+        if option.quality_retained is not None:
+            cost = self_hosted_usd_per_1k(option, utilisation)
+            rows.append(
+                {
+                    "option": f"{option.name} at {utilisation:.0%} utilisation",
+                    "usd_per_1k": round(cost, 4),
+                    "quality_retained": option.quality_retained,
+                    "quality_adjusted_usd_per_1k": round(
+                        quality_adjusted_usd_per_1k(cost, option.quality_retained), 4
+                    ),
+                }
+            )
+    for api in inputs.apis:
+        if api.quality_retained is not None:
+            cost = api.usd_per_1k(batch=True)
+            rows.append(
+                {
+                    "option": f"{api.name} batch",
+                    "usd_per_1k": round(cost, 4),
+                    "quality_retained": api.quality_retained,
+                    "quality_adjusted_usd_per_1k": round(
+                        quality_adjusted_usd_per_1k(cost, api.quality_retained), 4
+                    ),
+                }
+            )
+    return rows
+
+
 def report_markdown(inputs: CostInputs) -> str:
     lines: list[str] = []
     if not inputs.fully_measured:
@@ -184,4 +272,19 @@ def report_markdown(inputs: CostInputs) -> str:
             f"| {row['self_hosted']} | {row['api']} | {row['api_mode']} | "
             f"{row['api_usd_per_1k']} | {calls_text} | {utilisation_text} |"
         )
+    quality = quality_adjusted_rows(inputs)
+    if quality:
+        lines += [
+            "",
+            "| Option | $/1k | Quality retained | Quality-adjusted $/1k |",
+            "|---|---:|---:|---:|",
+        ]
+        for row in quality:
+            lines.append(
+                f"| {row['option']} | {row['usd_per_1k']} | {row['quality_retained']} | "
+                f"{row['quality_adjusted_usd_per_1k']} |"
+            )
+    lines += ["", "| Length factor | Option | $/1k |", "|---:|---|---:|"]
+    for row in length_sensitivity(inputs):
+        lines.append(f"| {row['length_factor']} | {row['option']} | {row['usd_per_1k']} |")
     return "\n".join(lines) + "\n"

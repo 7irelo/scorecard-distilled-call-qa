@@ -23,7 +23,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from scorecard.baselines.llm_system import parse_scorecard
 from scorecard.data.models import Speaker, Transcript, Turn
 from scorecard.schema import Scorecard, semantic_issues
-from scorecard.serve.inference import BackendUnavailable, FakeBackend, InferenceBackend, VLLMBackend
+from scorecard.serve.inference import (
+    BackendUnavailable,
+    FakeBackend,
+    InferenceBackend,
+    TranscriptTooLong,
+    VLLMBackend,
+)
 
 log = logging.getLogger("scorecard.api")
 
@@ -37,6 +43,7 @@ class Settings(BaseModel):
     max_concurrency: int = 16
     max_queue: int = 64
     request_timeout_s: float = 120.0
+    max_batch: int = 100
 
 
 class TurnIn(BaseModel):
@@ -66,6 +73,22 @@ class ScorecardResponse(BaseModel):
     model_info: ModelInfo
     semantic_warnings: list[str]
     attempts: int
+
+
+class BatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    calls: list[ScorecardRequest] = Field(min_length=1)
+
+
+class BatchItem(BaseModel):
+    call_id: str
+    status: int
+    result: ScorecardResponse | None = None
+    error: str | None = None
+
+
+class BatchResponse(BaseModel):
+    results: list[BatchItem]
 
 
 class _Metrics:
@@ -111,7 +134,9 @@ def create_app(settings: Settings, backend: InferenceBackend) -> FastAPI:
     async def reject_oversized_bodies(request: Request, call_next):  # type: ignore[no-untyped-def]
         length = request.headers.get("content-length")
         # Allows for JSON overhead here. The exact text limit is enforced after parsing.
-        if length and length.isdigit() and int(length) > 2 * settings.max_transcript_chars + 65_536:
+        calls = settings.max_batch if request.url.path.endswith("/batch") else 1
+        allowed = calls * (2 * settings.max_transcript_chars + 65_536)
+        if length and length.isdigit() and int(length) > allowed:
             metrics.requests.labels("too_large").inc()
             return JSONResponse({"detail": "transcript too large"}, status_code=413)
         return await call_next(request)
@@ -131,10 +156,7 @@ def create_app(settings: Settings, backend: InferenceBackend) -> FastAPI:
             log.warning("invalid model output request_id=%s attempt=%d", request_id, attempt)
         raise HTTPException(status_code=502, detail="model returned invalid output twice")
 
-    @app.post("/v1/scorecards", response_model=ScorecardResponse)
-    async def create_scorecard(
-        body: ScorecardRequest, _: Annotated[None, Depends(authorize)]
-    ) -> ScorecardResponse:
+    async def score_call(body: ScorecardRequest) -> ScorecardResponse:
         request_id = uuid.uuid4().hex
         chars = sum(len(turn.text) for turn in body.turns)
         if chars > settings.max_transcript_chars:
@@ -161,6 +183,9 @@ def create_app(settings: Settings, backend: InferenceBackend) -> FastAPI:
         except TimeoutError as exc:
             metrics.requests.labels("timeout").inc()
             raise HTTPException(status_code=504, detail="inference timed out") from exc
+        except TranscriptTooLong as exc:
+            metrics.requests.labels("too_large").inc()
+            raise HTTPException(status_code=413, detail="transcript exceeds model context") from exc
         except BackendUnavailable as exc:
             metrics.requests.labels("backend_error").inc()
             log.error("backend error request_id=%s type=%s", request_id, exc)
@@ -190,6 +215,30 @@ def create_app(settings: Settings, backend: InferenceBackend) -> FastAPI:
             semantic_warnings=warnings,
             attempts=attempts,
         )
+
+    @app.post("/v1/scorecards", response_model=ScorecardResponse)
+    async def create_scorecard(
+        body: ScorecardRequest, _: Annotated[None, Depends(authorize)]
+    ) -> ScorecardResponse:
+        return await score_call(body)
+
+    @app.post("/v1/scorecards/batch", response_model=BatchResponse)
+    async def create_batch(
+        body: BatchRequest, _: Annotated[None, Depends(authorize)]
+    ) -> BatchResponse:
+        """Each call succeeds or fails on its own, so one bad call can't lose a whole batch."""
+        if len(body.calls) > settings.max_batch:
+            raise HTTPException(status_code=413, detail=f"at most {settings.max_batch} calls")
+        if len({call.call_id for call in body.calls}) != len(body.calls):
+            raise HTTPException(status_code=422, detail="call ids must be unique")
+
+        async def one(call: ScorecardRequest) -> BatchItem:
+            try:
+                return BatchItem(call_id=call.call_id, status=200, result=await score_call(call))
+            except HTTPException as exc:
+                return BatchItem(call_id=call.call_id, status=exc.status_code, error=exc.detail)
+
+        return BatchResponse(results=list(await asyncio.gather(*(one(c) for c in body.calls))))
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

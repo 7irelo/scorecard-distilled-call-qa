@@ -4,6 +4,7 @@ self_hosted:
   - name: L4 Secure Cloud
     gpu_usd_per_hour: 0.59
     peak_calls_per_hour: 1800 # Placeholder: 30 calls/min, not measured
+    serverless_usd_per_hour: 0.75 # RunPod list price, checked 2026-11-03
     measured: false
 apis:
   - name: Opus 5.5

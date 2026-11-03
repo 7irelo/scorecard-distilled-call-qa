@@ -17,6 +17,10 @@ class BackendUnavailable(RuntimeError):
     pass
 
 
+class TranscriptTooLong(ValueError):
+    """The call exceeds the model's context. It must be rejected, not truncated."""
+
+
 @dataclass(frozen=True)
 class Generation:
     text: str
@@ -28,6 +32,11 @@ class InferenceBackend(Protocol):
     async def generate(self, transcript: Transcript) -> Generation: ...
 
     async def ready(self) -> bool: ...
+
+
+def _is_context_error(text: str) -> bool:
+    lowered = text.lower()
+    return "context length" in lowered or "maximum context" in lowered
 
 
 class VLLMBackend:
@@ -67,6 +76,8 @@ class VLLMBackend:
         }
         try:
             reply = await self._client.post("chat/completions", json=body)
+            if reply.status_code == 400 and _is_context_error(reply.text):
+                raise TranscriptTooLong("exceeds model context")
             reply.raise_for_status()
         except httpx.HTTPError as exc:
             raise BackendUnavailable(type(exc).__name__) from exc

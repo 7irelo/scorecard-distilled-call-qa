@@ -1,0 +1,36 @@
+# Serve merged weights, to compare with serving the adapter (docker/compose.yaml):
+#   scorecard train merge "$BASE_MODEL" runs/<run>/final_adapter runs/merged
+#   MERGED_DIR=$PWD/runs/merged docker compose -f docker/compose.merged.yaml up --build
+services:
+  vllm:
+    # Pin an exact tag and confirm it supports the base model before a real run.
+    image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to an exact version}
+    command:
+      - --model=/model
+      - --served-model-name=student
+      - --max-model-len=${MAX_MODEL_LEN:-9216}
+    volumes:
+      - ${MERGED_DIR:?set MERGED_DIR}:/model:ro
+    gpus: all
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 40
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    environment:
+      SCORECARD_API_KEY: ${SCORECARD_API_KEY:?set SCORECARD_API_KEY}
+      SCORECARD_BACKEND: vllm
+      SCORECARD_VLLM_URL: http://vllm:8000/v1
+      SCORECARD_VLLM_MODEL: student
+      SCORECARD_ADAPTER_HASH: merged
+    depends_on:
+      vllm:
+        condition: service_healthy
+    ports: ["8000:8000"]
+    read_only: true
+    tmpfs: [/tmp]
