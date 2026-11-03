@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +21,25 @@ from scorecard.data.verify import render_and_verify_all
 from scorecard.eval.faithfulness import judge_blinded
 from scorecard.eval.fields import EvalSet, SystemOutput
 from scorecard.eval.report import build_report
+from scorecard.eval.robustness import (
+    bad_input_test,
+    client_predictor,
+    injection_test,
+    noise_sweep,
+    robustness_markdown,
+)
+from scorecard.gold.audit import (
+    adjudication_queue,
+    apply_decisions,
+    audit_markdown,
+    audit_teacher,
+)
 from scorecard.gold.sampling import lock_test_set, open_test_set, stratified_gold_sample
 from scorecard.io import write_jsonl
 from scorecard.llm.client import CostLedger, LLMClient, ResponseCache
 from scorecard.llm.fake import FakeLLMBackend, corrupt_card
 from scorecard.schema import Scorecard
-from scorecard.teacher.label import TeacherLabel, label_all, qc_label, qc_report
+from scorecard.teacher.label import TeacherLabel, label_all, planted_labels, qc_label, qc_report
 
 
 def _simulate_human(spec: ScenarioSpec, transcript: Transcript) -> Scorecard:
@@ -170,6 +184,44 @@ async def _pipeline(n: int, seed: int, out: Path) -> dict[str, Any]:
         resamples=200,
     )
     (out / "REPORT.md").write_text(report, encoding="utf-8")
+
+    # Teacher audit, with every disagreement decided for the planted truth.
+    queue = adjudication_queue(
+        gold, {i: label_map[i].card for i in ids}, {i: planted_labels(by_id[i]) for i in ids}
+    )
+    decisions = [
+        {**asdict(item), "verdict": "planted", "value": item.planted, "evidence_turns": [1]}
+        for item in queue
+        if item.planted is not None
+    ]
+    final_gold, _ = apply_decisions(gold, decisions)
+    audits = audit_teacher(
+        final_gold,
+        {i: label_map[i].card for i in ids},
+        {item.scenario_id: item.design_weight for item in test_items},
+        {i: by_id[i].language_mix.value for i in ids},
+    )
+    (out / "TEACHER_AUDIT.md").write_text(
+        audit_markdown(audits, decisions, dry_run=True), encoding="utf-8"
+    )
+
+    # Robustness, using a smaller noise sweep so the dry run stays fast.
+    predict = client_predictor(client, "stub-robustness")
+    clean = [result.transcript for result, _ in rendered if result.transcript is not None]
+    noise = await noise_sweep(
+        predict,
+        clean,
+        gold,
+        {item.scenario_id: item.design_weight for item in test_items},
+        NoiseProfile(),
+        factors=(0.0, 1.0, 3.0),
+        seed=seed,
+    )
+    injection = await injection_test(predict, eval_transcripts[:20])
+    bad = await bad_input_test(predict)
+    (out / "ROBUSTNESS.md").write_text(
+        robustness_markdown(noise, injection, bad, "stub", dry_run=True), encoding="utf-8"
+    )
     cache.close()
     result = {
         **summary,

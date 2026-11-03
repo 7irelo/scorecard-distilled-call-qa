@@ -30,6 +30,7 @@ train = [
   "wandb>=0.18",
 ]
 closed-baselines = ["anthropic>=0.60"]
+report = ["matplotlib>=3.9"]
 
 [project.scripts]
 scorecard = "scorecard.cli:app"
@@ -60,8 +61,10 @@ packages = ["scorecard"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "jiwer.*", "datasets.*", "peft.*", "trl.*", "transformers.*", "torch.*", "wandb.*", "anthropic.*"]
+module = ["sklearn.*", "jiwer.*", "datasets.*", "peft.*", "trl.*", "transformers.*", "torch.*", "wandb.*", "anthropic.*", "matplotlib.*"]
 ignore_missing_imports = true
+# Optional extras: results must not depend on which extras are installed.
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
