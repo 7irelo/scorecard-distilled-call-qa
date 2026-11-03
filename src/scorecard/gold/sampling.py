@@ -127,6 +127,15 @@ def open_test_set(labels_path: Path, lock_path: Path, post_hoc_reason: str | Non
     return labels_path
 
 
+def assert_not_sealed(labels_path: Path, lock_path: Path) -> None:
+    """Refuse locked test labels until `eval final` has recorded the opening."""
+    if not lock_path.exists():
+        return
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    if sha256_file(labels_path) == lock["sha256"] and not lock["openings"]:
+        raise TestSetSealed(f"{labels_path} is sealed until `eval final` has run")
+
+
 def post_hoc_openings(lock_path: Path) -> list[str]:
     lock = json.loads(lock_path.read_text(encoding="utf-8"))
     return [o["post_hoc_reason"] for o in lock["openings"] if o["post_hoc_reason"]]
