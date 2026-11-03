@@ -23,10 +23,10 @@ from scorecard.eval.faithfulness import (
 )
 from scorecard.eval.fields import EvalSet, SystemOutput
 from scorecard.eval.report import build_report
-from scorecard.gold.sampling import open_test_set, post_hoc_openings
-from scorecard.io import read_jsonl, write_jsonl
+from scorecard.gold.sampling import TestSetSealed, open_test_set, post_hoc_openings
+from scorecard.io import read_jsonl, sha256_file, write_jsonl
 from scorecard.llm.client import LLMClient
-from scorecard.schema import Scorecard
+from scorecard.schema import Scorecard, flatten_labels
 
 
 def prediction_row(prediction: Prediction) -> dict[str, Any]:
@@ -117,8 +117,8 @@ async def _judge_all(
     model: str,
     systems: dict[str, dict[str, Scorecard | None]],
     transcripts: dict[str, Transcript],
-    calibration: JudgeCalibration,
 ) -> dict[str, dict[str, float]]:
+    """Raw judged scores. A judge failure becomes NaN, and is reported rather than scored."""
     jobs = [
         (name, scenario_id, transcripts[scenario_id], card.summary)
         for name, cards in systems.items()
@@ -128,8 +128,117 @@ async def _judge_all(
     results = await judge_blinded(client, model, jobs)
     scores: dict[str, dict[str, float]] = {name: {} for name in systems}
     for (name, scenario_id), result in results.items():
-        scores[name][scenario_id] = calibration.correct(result.score)
+        scores[name][scenario_id] = float("nan") if result.failed else result.score
     return scores
+
+
+def sample_errors(
+    eval_set: EvalSet,
+    output: SystemOutput,
+    transcripts: dict[str, Transcript],
+    n: int = 50,
+    seed: int = 0,
+) -> list[dict[str, Any]]:
+    """Student errors to read and categorise by hand. Fill in `category` while reading."""
+    errors: list[dict[str, Any]] = []
+    for scenario_id in eval_set.ids:
+        card = output.cards.get(scenario_id)
+        gold = flatten_labels(eval_set.gold[scenario_id])
+        guess = flatten_labels(card) if card is not None else {}
+        for name, value in gold.items():
+            if guess.get(name) != value:
+                errors.append(
+                    {
+                        "scenario_id": scenario_id,
+                        "field": name,
+                        "gold": value,
+                        "predicted": guess.get(name),
+                        "transcript": transcripts[scenario_id].render(),
+                        "category": "",
+                    }
+                )
+    random.Random(seed).shuffle(errors)
+    return errors[:n]
+
+
+def _length_bucket(transcript: Transcript) -> str:
+    turns = len(transcript.turns)
+    return "short (<25 turns)" if turns < 25 else "medium" if turns < 60 else "long (60+ turns)"
+
+
+def evaluate_systems(
+    gold: dict[str, Scorecard],
+    weights_by_id: dict[str, float],
+    predictions_dir: Path,
+    transcripts: dict[str, Transcript],
+    specs: dict[str, ScenarioSpec],
+    judge: LLMClient,
+    judge_model: str,
+    calibration: JudgeCalibration,
+    output_dir: Path,
+    focus: str = "student",
+    post_hoc: list[str] | None = None,
+    resamples: int = 2000,
+) -> dict[str, object]:
+    ids = tuple(sorted(gold))
+    eval_set = EvalSet(ids, gold, np.array([weights_by_id[i] for i in ids], dtype=float))
+
+    systems: dict[str, dict[str, Scorecard | None]] = {}
+    validity: dict[str, dict[str, bool]] = {}
+    for path in sorted(predictions_dir.glob("*.jsonl")):
+        cards, valid = load_predictions(path)
+        systems[path.stem] = {i: cards.get(i) for i in ids}
+        validity[path.stem] = valid
+    for required in (focus, "teacher"):
+        if required not in systems:
+            raise ValueError(f"missing predictions for {required} in {predictions_dir}")
+
+    faithfulness = asyncio.run(_judge_all(judge, judge_model, systems, transcripts))
+    outputs = {
+        name: SystemOutput(name, cards, faithfulness[name], validity[name], calibration.correct)
+        for name, cards in systems.items()
+    }
+    others = [output for name, output in outputs.items() if name not in {focus, "teacher"}]
+    slices = {
+        "language mix": {i: specs[i].language_mix.value for i in ids},
+        "call type": {i: specs[i].call_type.value for i in ids},
+        "length": {i: _length_bucket(transcripts[i]) for i in ids},
+    }
+    report, summary = build_report(
+        eval_set,
+        outputs[focus],
+        outputs["teacher"],
+        others,
+        slices=slices,
+        post_hoc=post_hoc or (),
+        resamples=resamples,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "REPORT.md").write_text(report, encoding="utf-8")
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    write_jsonl(
+        output_dir / "errors_to_read.jsonl",
+        sample_errors(eval_set, outputs[focus], transcripts),
+    )
+    write_jsonl(
+        output_dir / "faithfulness.jsonl",
+        (
+            {"system": name, "scenario_id": scenario_id, "score": score}
+            for name, scores in faithfulness.items()
+            for scenario_id, score in scores.items()
+        ),
+    )
+    return summary
+
+
+def _gold_and_weights(
+    gold_path: Path, gold_items_path: Path
+) -> tuple[dict[str, Scorecard], dict[str, float]]:
+    gold = {
+        row["scenario_id"]: Scorecard.model_validate(row["card"]) for row in read_jsonl(gold_path)
+    }
+    weights = {row["scenario_id"]: row["design_weight"] for row in read_jsonl(gold_items_path)}
+    return gold, weights
 
 
 def run_final_evaluation(
@@ -143,56 +252,60 @@ def run_final_evaluation(
     judge_model: str,
     calibration: JudgeCalibration,
     output_dir: Path,
+    frozen_path: Path,
     post_hoc_reason: str | None = None,
+    resamples: int = 2000,
 ) -> dict[str, object]:
     """Opens the test set. This is recorded, and a second opening must state a reason."""
+    if not frozen_path.exists():
+        raise FileNotFoundError(f"freeze the chosen run first: {frozen_path} doesn't exist")
     open_test_set(gold_path, lock_path, post_hoc_reason)
-    gold = {
-        row["scenario_id"]: Scorecard.model_validate(row["card"]) for row in read_jsonl(gold_path)
-    }
-    weights_by_id = {
-        row["scenario_id"]: row["design_weight"] for row in read_jsonl(gold_items_path)
-    }
-    ids = tuple(sorted(gold))
-    eval_set = EvalSet(ids, gold, np.array([weights_by_id[i] for i in ids], dtype=float))
-
-    systems: dict[str, dict[str, Scorecard | None]] = {}
-    validity: dict[str, dict[str, bool]] = {}
-    for path in sorted(predictions_dir.glob("*.jsonl")):
-        cards, valid = load_predictions(path)
-        systems[path.stem] = {i: cards.get(i) for i in ids}
-        validity[path.stem] = valid
-    for required in ("student", "teacher"):
-        if required not in systems:
-            raise ValueError(f"missing predictions for {required} in {predictions_dir}")
-
-    faithfulness = asyncio.run(_judge_all(judge, judge_model, systems, transcripts, calibration))
-    outputs = {
-        name: SystemOutput(name, cards, faithfulness[name], validity[name])
-        for name, cards in systems.items()
-    }
-    others = [output for name, output in outputs.items() if name not in {"student", "teacher"}]
-    slices = {
-        "language mix": {i: specs[i].language_mix.value for i in ids},
-        "call type": {i: specs[i].call_type.value for i in ids},
-    }
-    report, summary = build_report(
-        eval_set,
-        outputs["student"],
-        outputs["teacher"],
-        others,
-        slices=slices,
+    gold, weights = _gold_and_weights(gold_path, gold_items_path)
+    return evaluate_systems(
+        gold,
+        weights,
+        predictions_dir,
+        transcripts,
+        specs,
+        judge,
+        judge_model,
+        calibration,
+        output_dir,
         post_hoc=post_hoc_openings(lock_path),
+        resamples=resamples,
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "REPORT.md").write_text(report, encoding="utf-8")
-    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    write_jsonl(
-        output_dir / "faithfulness.jsonl",
-        (
-            {"system": name, "scenario_id": scenario_id, "score": score}
-            for name, scores in faithfulness.items()
-            for scenario_id, score in scores.items()
-        ),
+
+
+def run_selection_evaluation(
+    gold_path: Path,
+    lock_path: Path,
+    gold_items_path: Path,
+    predictions_dir: Path,
+    transcripts: dict[str, Transcript],
+    specs: dict[str, ScenarioSpec],
+    judge: LLMClient,
+    judge_model: str,
+    calibration: JudgeCalibration,
+    output_dir: Path,
+    focus: str = "student",
+    resamples: int = 2000,
+) -> dict[str, object]:
+    """Compare systems on dev gold, as often as needed. Refuses the sealed test labels."""
+    if lock_path.exists():
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        if sha256_file(gold_path) == lock["sha256"]:
+            raise TestSetSealed(f"{gold_path} is the sealed test set; use `eval final`")
+    gold, weights = _gold_and_weights(gold_path, gold_items_path)
+    return evaluate_systems(
+        gold,
+        weights,
+        predictions_dir,
+        transcripts,
+        specs,
+        judge,
+        judge_model,
+        calibration,
+        output_dir,
+        focus=focus,
+        resamples=resamples,
     )
-    return summary

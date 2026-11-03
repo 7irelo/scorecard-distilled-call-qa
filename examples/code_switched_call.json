@@ -1,0 +1,11 @@
+{
+  "call_id": "demo-1",
+  "turns": [
+    {"id": 1, "speaker": "AGENT", "text": "Sawubona, my name is Bongani from Umoya Networks. This call may be recorded."},
+    {"id": 2, "speaker": "CUSTOMER", "text": "Sawubona. My fibre has been down for three days, inkinga enkulu, and I work from home."},
+    {"id": 3, "speaker": "AGENT", "text": "I'm sorry to hear that. Ngicela your ID number and your address?"},
+    {"id": 4, "speaker": "CUSTOMER", "text": "Eight zero zero one, and twelve Main Road, Soweto."},
+    {"id": 5, "speaker": "AGENT", "text": "Thank you. I can see a fault in your area. A technician will come tomorrow morning and you will get an SMS with a reference number."},
+    {"id": 6, "speaker": "CUSTOMER", "text": "Kulungile, ngiyabonga."}
+  ]
+}

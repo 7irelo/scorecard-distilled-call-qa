@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import io
 import wave
-from typing import Protocol
+from typing import Any, Protocol
 from xml.sax.saxutils import escape
 
 import httpx
@@ -83,6 +83,13 @@ class DeepgramTranscriber:
         reply.raise_for_status()
         channel = reply.json()["results"]["channels"][0]
         return str(channel["alternatives"][0]["transcript"])
+
+    def transcribe_utterances(self, wav: bytes) -> list[dict[str, Any]]:
+        """Diarized utterances, each with a speaker number and a transcript."""
+        params = {**self._params, "diarize": "true", "utterances": "true", "punctuate": "true"}
+        reply = self._client.post("/v1/listen", params=params, content=wav)
+        reply.raise_for_status()
+        return list(reply.json()["results"]["utterances"])
 
 
 def _read_pcm16(wav_bytes: bytes) -> tuple[np.ndarray, int]:
