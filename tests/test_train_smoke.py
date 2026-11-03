@@ -62,6 +62,8 @@ def _config(rows_path, tmp_path, **overrides):
 
 
 def test_full_json_training_runs_and_saves_an_adapter(rows_path, tmp_path):
+    from safetensors.torch import load_file
+
     from scorecard.train.run import run_training
 
     config = _config(rows_path, tmp_path)
@@ -71,6 +73,11 @@ def test_full_json_training_runs_and_saves_an_adapter(rows_path, tmp_path):
     assert summary["provenance"]["device"] == "cpu"
     assert (config.run_dir / "final_adapter" / "adapter_config.json").exists()
     assert (config.run_dir / "best_adapter" / "adapter_config.json").exists()
+    # LoRA's B matrices start at zero, so non-zero values prove gradients reached the adapter.
+    weights = load_file(config.run_dir / "final_adapter" / "adapter_model.safetensors")
+    trained = [tensor for name, tensor in weights.items() if "lora_B" in name]
+    assert trained
+    assert any(tensor.abs().sum() > 0 for tensor in trained)
     written = json.loads((config.run_dir / "run_summary.json").read_text())
     assert "val/validity" in written["final_metrics"]
 
