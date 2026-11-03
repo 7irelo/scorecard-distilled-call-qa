@@ -17,7 +17,22 @@ uv run pytest -m "not train"
 uv run scorecard dry-run        # the whole pipeline on stub models: free, and takes seconds
 ```
 
-The dry run proves the plumbing only. Its report carries a banner saying so.
+The dry run proves the plumbing only. Its reports carry a banner saying so.
+
+To exercise the training code on CPU with a tiny model, which also proves nothing about quality:
+
+```powershell
+uv sync --python 3.12 --extra train
+uv run pytest -m train
+```
+
+To try the API without a GPU:
+
+```powershell
+$env:SCORECARD_API_KEY = "local"
+docker compose -f docker/compose.fake.yaml up --build
+uv run scorecard demo
+```
 
 ## How it works
 
