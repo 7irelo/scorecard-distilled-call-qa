@@ -12,7 +12,7 @@ from scorecard.serve.cost_model import (
 )
 
 # Fixed order, so a line's colour follows the option rather than its rank.
-_SERIES_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#6250d6", "#008300", "#e34948", "#e87ba4")
+_SERIES_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6")
 _INK, _MUTED, _GRID, _SURFACE = "#1f1f1d", "#6b6a63", "#e6e5e0", "#fcfcfb"
 _WARNING = "PLACEHOLDER INPUTS: do not quote"
 
@@ -74,7 +74,7 @@ def render_chart(inputs: CostInputs, output: Path) -> Path:
     axes.set_ylabel("Cost per month (USD)", color=_MUTED)
     axes.grid(True, which="major", color=_GRID, linewidth=0.8)
     axes.set_axisbelow(True)
-    axes.tick_params(colors=_MUTED, length=0)
+    axes.tick_params(which="both", colors=_MUTED, length=0)
     for side in ("top", "right", "left", "bottom"):
         axes.spines[side].set_visible(False)
     title = "Self-hosting pays off only at enough volume"
