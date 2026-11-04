@@ -16,7 +16,7 @@ Tested so far: the pipeline on stub models, training on CPU with a tiny random m
 ```powershell
 uv sync --python 3.12
 uv run pytest -m "not train"
-uv run scorecard dry-run        # the whole pipeline on stub models: free, and takes seconds
+uv run scorecard dry-run        # the whole pipeline on stub models: free, and takes about a minute
 ```
 
 The dry run proves the plumbing only. Its reports carry a banner saying so.
