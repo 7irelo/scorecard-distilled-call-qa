@@ -73,6 +73,7 @@ from scorecard.io import read_jsonl, write_jsonl
 from scorecard.llm.config import build_client, load_llm_config
 from scorecard.prompts import load_rubric, small_model_messages
 from scorecard.schema import Scorecard, flatten_labels
+from scorecard.serve.check import check_server
 from scorecard.serve.cost_chart import render_chart
 from scorecard.serve.cost_model import load_cost_inputs, report_markdown, volume_table
 from scorecard.serve.loadgen import (
@@ -894,6 +895,22 @@ def bench_ttft(
 def bench_ledger(path: Path = Path("runs/cost_ledger.jsonl"), model: str | None = None) -> None:
     """Measured tokens, latency and cost per model, to use as cost-model inputs."""
     typer.echo(json.dumps(ledger_stats(path, model), indent=2))
+
+
+@bench_app.command("vllm-check")
+def bench_vllm_check(
+    url: str = "http://127.0.0.1:8001/v1",
+    student: str = "student",
+    base: str = "base",
+) -> None:
+    """Check a real vLLM server. Exits non-zero if adapters, schemas or overflow handling fail."""
+    results = asyncio.run(
+        check_server(url, student, base or None, os.environ.get("SCORECARD_VLLM_KEY", ""))
+    )
+    for result in results:
+        typer.echo(f"{'PASS' if result.passed else 'FAIL'} {result.name}: {result.detail}")
+    if not all(result.passed for result in results):
+        raise typer.Exit(code=1)
 
 
 @bench_app.command("chart")

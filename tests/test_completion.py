@@ -57,7 +57,14 @@ from scorecard.llm.backends import AnthropicBackend, OpenAICompatibleBackend
 from scorecard.llm.client import LLMClient, ResponseCache, cache_key
 from scorecard.llm.config import ModelConfig, build_backend, load_llm_config
 from scorecard.llm.fake import FakeLLMBackend
-from scorecard.llm.types import LLMRequest, LLMResponse, Outcome, ProviderClass, Purpose
+from scorecard.llm.types import (
+    LLMRequest,
+    LLMResponse,
+    Outcome,
+    ProviderClass,
+    Purpose,
+    RetryableError,
+)
 from scorecard.schema import Scorecard, flatten_labels
 from scorecard.serve.app import Settings, create_app
 from scorecard.serve.cost_chart import chart_series
@@ -919,3 +926,51 @@ def test_fake_backend_still_answers_baselines():
     )
     assert flatten_labels(Scorecard.model_validate_json(response.text))
     assert ResponseCache
+
+
+# Provider decisions from docs/adr/0001-licensing.md.
+def test_repo_config_has_no_placeholders_and_avoids_zai_hosting():
+    config = load_llm_config(__import__("pathlib").Path("configs/llm.yaml"))
+    assert "SET_ME" not in {model.model_id for model in config.models.values()}
+    for model in config.models.values():
+        assert "z.ai" not in (model.base_url or "")
+    assert config.model_for("judge").extra_body["provider"]["ignore"] == ["z-ai"]
+    assert config.model_for("teacher").structured_mode == "json_object"
+    assert config.model_for("teacher").base_url == "https://api.deepseek.com"
+
+
+def _capture_backend(reply_text, finish="stop", **kwargs):
+    seen = {}
+
+    def handler(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": reply_text}, "finish_reason": finish}]}
+        )
+
+    return OpenAICompatibleBackend(
+        "http://x", transport=httpx.MockTransport(handler), **kwargs
+    ), seen
+
+
+def test_json_object_mode_states_the_schema_and_mentions_json():
+    backend, seen = _capture_backend("{}", structured_mode="json_object")
+    request = LLMRequest(
+        "m", (("user", "hi"),), Purpose.TEACHER, json_schema={"type": "object", "title": "Card"}
+    )
+    asyncio.run(backend.complete(request))
+    assert seen["response_format"] == {"type": "json_object"}
+    assert "JSON" in seen["messages"][0]["content"]
+    assert '"title": "Card"' in seen["messages"][0]["content"]
+    assert seen["messages"][-1]["content"] == "hi"
+
+
+def test_blank_json_response_is_retried_but_blank_free_text_is_not():
+    backend, _ = _capture_backend("   ", structured_mode="json_object")
+    with_schema = LLMRequest(
+        "m", (("user", "hi"),), Purpose.TEACHER, json_schema={"type": "object"}
+    )
+    with pytest.raises(RetryableError):
+        asyncio.run(backend.complete(with_schema))
+    plain = LLMRequest("m", (("user", "hi"),), Purpose.TEACHER)
+    assert asyncio.run(backend.complete(plain)).outcome is Outcome.OK

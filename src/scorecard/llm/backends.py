@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -21,7 +22,9 @@ class OpenAICompatibleBackend:
         timeout: float = 600.0,
         transport: httpx.AsyncBaseTransport | None = None,
         extra_body: dict[str, Any] | None = None,
+        structured_mode: str = "json_schema",
     ) -> None:
+        self._structured_mode = structured_mode
         self._extra_body = extra_body or {}
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = httpx.AsyncClient(
@@ -39,7 +42,18 @@ class OpenAICompatibleBackend:
             "temperature": request.temperature,
             **self._extra_body,
         }
-        if request.json_schema is not None:
+        if request.json_schema is not None and self._structured_mode == "json_object":
+            # This mode can't enforce a schema, so state it in the prompt. Parsers still validate.
+            schema = json.dumps(request.json_schema, ensure_ascii=False)
+            body["response_format"] = {"type": "json_object"}
+            body["messages"] = [
+                {
+                    "role": "system",
+                    "content": f"Reply with only JSON matching this schema: {schema}",
+                },
+                *body["messages"],
+            ]
+        elif request.json_schema is not None:
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "output", "schema": request.json_schema, "strict": True},
@@ -56,6 +70,10 @@ class OpenAICompatibleBackend:
         choice = payload["choices"][0]
         usage = payload.get("usage") or {}
         finish = choice.get("finish_reason")
+        # DeepSeek documents blank content as a transient JSON-mode failure, so retry it.
+        content = choice["message"].get("content") or ""
+        if request.json_schema is not None and finish == "stop" and not content.strip():
+            raise RetryableError("blank JSON response")
         outcome = {"content_filter": Outcome.REFUSED, "length": Outcome.TRUNCATED}.get(
             finish, Outcome.OK
         )

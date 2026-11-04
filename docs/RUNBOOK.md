@@ -14,7 +14,15 @@ uv run pytest -m "not train"
 uv run scorecard dry-run # free, proves the plumbing with stub models
 ```
 
-Close the open items in `docs/adr/0001-licensing.md` before paying for generation. Set the real model IDs and prices in `configs/llm.yaml`.
+Close the open items in `docs/adr/0001-licensing.md`, and re-check the IDs and prices in `configs/llm.yaml`.
+
+Generation runs on your own GPU, because Z.ai's terms rule out its API and self-hosting avoids any host's terms. Start it on a rented GPU with about 48 GB and point `qwen_generator.base_url` at it:
+
+```bash
+VLLM_TAG=... GENERATOR_REVISION=... docker compose -f docker/compose.generator.yaml up
+```
+
+Stop the pod when you aren't generating, as it bills by the hour.
 
 ## Phase 1: Rubric (you and a second person)
 
@@ -32,7 +40,7 @@ Turn each disagreement into a clarification in `docs/RUBRIC.md`, and have a nati
 
 ```powershell
 uv run scorecard data sample --n 5000
-uv run scorecard data generate --limit 50          # PAID, about $1
+uv run scorecard data generate --limit 50          # PAID: GPU hours, plus DeepSeek to verify
 uv run scorecard data review-sheet zu --n 25
 uv run scorecard data review-sheet af --n 25
 ```
@@ -49,7 +57,7 @@ uv run scorecard data review-score data/review_af.csv
 ```powershell
 uv run scorecard data round-trip --turns 2000      # PAID
 uv run scorecard data calibrate data/asr_pairs.jsonl
-uv run scorecard data generate                     # PAID, about $90
+uv run scorecard data generate                     # PAID: GPU hours, plus DeepSeek to verify
 uv run scorecard data quality --drop
 uv run scorecard data check-noise
 uv run scorecard data noise

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +25,7 @@ class ModelConfig(BaseModel):
     input_per_mtok: float = 0.0
     output_per_mtok: float = 0.0
     extra_body: dict[str, Any] = Field(default_factory=dict)
+    structured_mode: Literal["json_schema", "json_object"] = "json_schema"
 
 
 class LLMConfig(BaseModel):
@@ -55,7 +56,9 @@ def build_backend(model: ModelConfig) -> Backend:
     if model.base_url is None:
         raise ValueError(f"{model.model_id} needs a base_url")
     key = os.environ.get(model.api_key_env, "") if model.api_key_env else ""
-    return OpenAICompatibleBackend(model.base_url, key, extra_body=model.extra_body)
+    return OpenAICompatibleBackend(
+        model.base_url, key, extra_body=model.extra_body, structured_mode=model.structured_mode
+    )
 
 
 def build_client(config: LLMConfig, role: str, concurrency: int = 8) -> tuple[LLMClient, str]:
@@ -66,6 +69,8 @@ def build_client(config: LLMConfig, role: str, concurrency: int = 8) -> tuple[LL
         ledger=CostLedger(config.ledger_path),
         price=Price(model.input_per_mtok, model.output_per_mtok),
         concurrency=concurrency,
-        namespace=stable_json(model.extra_body) if model.extra_body else "",
+        namespace=stable_json(
+            {"extra_body": model.extra_body, "structured_mode": model.structured_mode}
+        ),
     )
     return client, model.model_id

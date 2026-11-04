@@ -1,8 +1,10 @@
 """Tests for dataset quality checks, review sheets, cost additions and the rubric call file."""
 
+import asyncio
 import csv
 import json
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
@@ -21,6 +23,7 @@ from scorecard.data.scenarios import sample_scenarios
 from scorecard.io import read_jsonl
 from scorecard.schema import Scorecard
 from scorecard.serve.app import Settings, create_app
+from scorecard.serve.check import check_server
 from scorecard.serve.cost_model import (
     ApiOption,
     CostInputs,
@@ -183,3 +186,32 @@ def test_demo_prints_a_scorecard_and_latency(monkeypatch):
     assert "Latency:" in result.output
     assert "$0.00100 per call" in result.output
     assert json.loads(result.output[: result.output.index("Latency:")])["schema_version"] == "1.0"
+
+
+def _vllm_handler(status_reply, overflow=True):
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "student"}, {"id": "base"}]})
+        body = json.loads(request.content)
+        if len(body["messages"][-1]["content"]) > 1000:
+            if overflow:
+                return httpx.Response(400, json={"message": "maximum context length is 8192"})
+            return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": status_reply}}]})
+
+    return httpx.MockTransport(handler)
+
+
+def _check(transport):
+    return {r.name: r for r in asyncio.run(check_server("http://v/v1", transport=transport))}
+
+
+def test_vllm_check_passes_a_healthy_server():
+    results = _check(_vllm_handler('{"status": "pass"}'))
+    assert all(result.passed for result in results.values())
+
+
+def test_vllm_check_catches_schema_breakage_and_silent_overflow():
+    results = _check(_vllm_handler('{"status": "maybe"}', overflow=False))
+    assert not results["constrained_with_adapter"].passed
+    assert not results["overflow_detected"].passed

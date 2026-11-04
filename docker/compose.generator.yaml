@@ -1,0 +1,22 @@
+# Serves the transcript generator on a rented GPU. A 27B model needs a card with about 48 GB, such
+# as an L40S. Pin both values before a real run:
+#   VLLM_TAG=... GENERATOR_REVISION=... docker compose -f docker/compose.generator.yaml up
+services:
+  generator:
+    image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to an exact version}
+    command:
+      - --model=Qwen/Qwen3.8-27B
+      - --revision=${GENERATOR_REVISION:?pin GENERATOR_REVISION to a commit hash}
+      - --served-model-name=generator
+      - --max-model-len=${MAX_MODEL_LEN:-16384}
+      # Each transcript takes one slot of this server, so raise this only as memory allows.
+      - --max-num-seqs=${MAX_NUM_SEQS:-16}
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ports: ["8002:8000"]
+    gpus: all
+
+volumes:
+  hf-cache:
