@@ -215,3 +215,25 @@ def test_vllm_check_catches_schema_breakage_and_silent_overflow():
     results = _check(_vllm_handler('{"status": "maybe"}', overflow=False))
     assert not results["constrained_with_adapter"].passed
     assert not results["overflow_detected"].passed
+
+
+def test_vllm_check_explains_running_out_of_tokens():
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "student"}, {"id": "base"}]})
+        message = {"message": {"content": "{\n   "}, "finish_reason": "length"}
+        return httpx.Response(200, json={"choices": [message]})
+
+    results = _check(httpx.MockTransport(handler))
+    assert "disable_any_whitespace" in results["constrained_with_adapter"].detail
+
+
+def test_gpu_compose_files_carry_the_settings_real_vllm_needed():
+    from pathlib import Path
+
+    for name in ("compose.yaml", "compose.merged.yaml", "compose.generator.yaml"):
+        text = Path("docker", name).read_text(encoding="utf-8")
+        assert "shm_size" in text
+        assert "- --model=" not in text
+    for name in ("compose.yaml", "compose.merged.yaml"):
+        assert "disable_any_whitespace=true" in Path("docker", name).read_text(encoding="utf-8")

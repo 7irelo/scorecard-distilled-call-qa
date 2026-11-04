@@ -9,7 +9,7 @@ Distill a large open LLM into a small model that scores South African contact-ce
 
 **The code covers every phase. There are no real results yet.** No real data has been generated and no real student has been trained, so this repo doesn't claim any quality or cost figures. Getting them needs API keys, a rented GPU, native-speaker reviewers and about 30 hours of human labelling, as set out in [the runbook](docs/RUNBOOK.md).
 
-Tested so far: the pipeline on stub models, training on CPU with a tiny random model, and the API container with rule-based outputs. Not yet run against the real thing: vLLM on a GPU, the hosted model APIs and the speech vendors, which are only mocked in tests.
+[What has been validated](docs/VALIDATION.md) lists exactly what has run, including real vLLM on CPU with a tiny model. vLLM on a GPU, the hosted model APIs and the speech vendors haven't run yet.
 
 ## Try it
 

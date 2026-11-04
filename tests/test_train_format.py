@@ -161,3 +161,8 @@ def test_repo_baseline_config_is_valid():
 def test_transcript_round_trip_through_row():
     row = _row()
     assert Transcript.model_validate(row["transcript"]) == FIXTURES[0][0]
+
+
+def test_per_field_schemas_are_bounded():
+    assert per_field_schema("summary")["properties"]["summary"]["maxLength"] == 1200
+    assert "enum" in str(per_field_schema("call_type"))

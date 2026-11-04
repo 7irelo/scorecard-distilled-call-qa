@@ -6,11 +6,16 @@ services:
     # Pin an exact tag and confirm it supports the base model before a real run.
     image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to an exact version}
     command:
-      - --model=/model
+      - /model
       - --served-model-name=student
       - --max-model-len=${MAX_MODEL_LEN:-9216}
+      # Without this, a model can emit endless whitespace, which is valid JSON, until max_tokens.
+      - --structured-outputs-config.backend=xgrammar
+      - --structured-outputs-config.disable_any_whitespace=true
     volumes:
       - ${MERGED_DIR:?set MERGED_DIR}:/model:ro
+    # vLLM fails to start on Docker's default 64 MB.
+    shm_size: 2g
     gpus: all
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]

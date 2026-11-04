@@ -5,18 +5,24 @@ services:
     # Pin an exact tag and confirm it supports the base model before a real run.
     image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to an exact version}
     command:
-      - --model=${BASE_MODEL:?set BASE_MODEL}
+      - ${BASE_MODEL:?set BASE_MODEL}
       - --revision=${BASE_REVISION:?pin BASE_REVISION to a commit hash}
       - --served-model-name=base
       - --enable-lora
       - --lora-modules=student=/adapters/student
-      - --max-lora-rank=${LORA_RANK:?set LORA_RANK to the adapter's actual rank}
+      # vLLM accepts 1, 8, 16, 32, 64, 128, 256, 320 or 512, so round your adapter's rank up.
+      - --max-lora-rank=${LORA_RANK:?set LORA_RANK, rounded up to a value vLLM accepts}
       - --max-model-len=${MAX_MODEL_LEN:-9216}
+      # Without this, a model can emit endless whitespace, which is valid JSON, until max_tokens.
+      - --structured-outputs-config.backend=xgrammar
+      - --structured-outputs-config.disable_any_whitespace=true
     environment:
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - ${ADAPTER_DIR:?set ADAPTER_DIR}:/adapters/student:ro
       - hf-cache:/root/.cache/huggingface
+    # vLLM fails to start on Docker's default 64 MB.
+    shm_size: 2g
     gpus: all
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]

@@ -9,6 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = "1.0"
 MAX_SUMMARY_WORDS = 80
+# Hard caps stop constrained decoding from running to max_tokens on a stuck model. The 80-word
+# rule stays in semantic_issues, because a JSON schema can only limit characters.
+MAX_SUMMARY_CHARS = 1200
+MAX_EVIDENCE_TURNS = 10
 
 
 class CallType(StrEnum):
@@ -62,7 +66,7 @@ class Sentiment(_Strict):
 
 class ComplianceCheck(_Strict):
     status: ComplianceStatus
-    evidence_turns: list[int] = Field(default_factory=list)
+    evidence_turns: list[int] = Field(default_factory=list, max_length=MAX_EVIDENCE_TURNS)
 
 
 class Compliance(_Strict):
@@ -83,7 +87,7 @@ class Escalation(_Strict):
 
 class Scorecard(_Strict):
     schema_version: Literal["1.0"] = "1.0"
-    summary: str
+    summary: str = Field(max_length=MAX_SUMMARY_CHARS)
     call_type: CallType
     sentiment: Sentiment
     compliance: Compliance

@@ -9,13 +9,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from scorecard.data.models import LanguageMix, Transcript
 from scorecard.data.reality import assert_no_reality_rows
 from scorecard.prompts import COMPACT_TASK, user_message
 from scorecard.schema import (
     COMPLIANCE_CHECKS,
+    MAX_SUMMARY_CHARS,
+    CallType,
     Compliance,
     ComplianceCheck,
     Escalation,
@@ -36,11 +38,11 @@ class ChatTokenizer(Protocol):
 
 
 class CallTypeField(BaseModel):
-    call_type: str
+    call_type: CallType
 
 
 class SummaryField(BaseModel):
-    summary: str
+    summary: str = Field(max_length=MAX_SUMMARY_CHARS)
 
 
 def per_field_targets(card: Scorecard) -> dict[str, str]:

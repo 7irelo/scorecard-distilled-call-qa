@@ -210,10 +210,11 @@ Read `runs/final/errors_to_read.jsonl` and fill in each `category`. Real failure
 ```bash
 export SCORECARD_API_KEY=... VLLM_TAG=... BASE_MODEL=... BASE_REVISION=... LORA_RANK=... ADAPTER_DIR=...
 docker compose -f docker/compose.yaml up --build
+uv run scorecard bench vllm-check --url http://127.0.0.1:8000/v1   # with vLLM's port exposed
 uv run scorecard demo
 ```
 
-Compare adapter serving with merged weights by running the same load test against `docker/compose.merged.yaml`. To compare bf16 with 8-bit, quantize the merged model and point `MERGED_DIR` at it.
+Round `LORA_RANK` up to a value vLLM accepts (a rank 4 adapter uses 8). Compare adapter serving with merged weights by running the same load test against `docker/compose.merged.yaml`. To compare bf16 with 8-bit, quantize the merged model and point `MERGED_DIR` at it.
 
 Run on two or three GPU types:
 

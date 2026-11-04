@@ -5,7 +5,7 @@ services:
   generator:
     image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to an exact version}
     command:
-      - --model=Qwen/Qwen3.8-27B
+      - Qwen/Qwen3.8-27B
       - --revision=${GENERATOR_REVISION:?pin GENERATOR_REVISION to a commit hash}
       - --served-model-name=generator
       - --max-model-len=${MAX_MODEL_LEN:-16384}
@@ -16,6 +16,8 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
     ports: ["8002:8000"]
+    # vLLM fails to start on Docker's default 64 MB.
+    shm_size: 2g
     gpus: all
 
 volumes:

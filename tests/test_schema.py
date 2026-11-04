@@ -45,6 +45,14 @@ def test_extra_fields_and_bad_enums_rejected():
         card(call_type="sales")
 
 
+def test_schema_caps_runaway_output():
+    with pytest.raises(ValidationError):
+        card(summary="x" * 1201)
+    schema = scorecard_json_schema()
+    assert schema["properties"]["summary"]["maxLength"] == 1200
+    assert schema["$defs"]["ComplianceCheck"]["properties"]["evidence_turns"]["maxItems"] == 10
+
+
 def test_json_schema_is_closed():
     schema = scorecard_json_schema()
     assert schema["additionalProperties"] is False

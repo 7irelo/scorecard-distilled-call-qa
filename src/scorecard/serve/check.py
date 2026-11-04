@@ -44,7 +44,13 @@ async def _constrained(
     reply = await client.post("chat/completions", json=body)
     if reply.status_code != 200:
         return False, f"HTTP {reply.status_code}: {reply.text[:200]}"
-    content = reply.json()["choices"][0]["message"].get("content") or ""
+    choice = reply.json()["choices"][0]
+    content = choice["message"].get("content") or ""
+    if choice.get("finish_reason") == "length":
+        return False, (
+            "ran out of tokens inside the JSON. If this is whitespace, start vLLM with "
+            "--structured-outputs-config.backend=xgrammar and .disable_any_whitespace=true"
+        )
     try:
         value = json.loads(content)["status"]
     except (json.JSONDecodeError, KeyError, TypeError):
