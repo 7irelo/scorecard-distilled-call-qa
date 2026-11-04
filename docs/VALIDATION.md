@@ -43,6 +43,7 @@ All fixed:
 |---|---|---|
 | vLLM on a GPU, with the real student | Needs a GPU | `scorecard bench vllm-check` |
 | QLoRA 4-bit training | bitsandbytes needs a GPU | `scorecard train overfit` |
+| Training Docker image | The build ran out of memory on the test machine, so it has never been built | `docker build -f docker/train.Dockerfile -t scorecard-train .` |
 | DeepSeek, OpenRouter, Azure, Deepgram, Anthropic | Needs API keys. Tested only with mocks | The 50-call pilot |
 | Qwen3.8-27B as generator | Needs about 48 GB of GPU memory | The 50-call pilot |
 
